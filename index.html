@@ -117,10 +117,14 @@
         let ripples = [];
         let dotSize = 8;
         let patternMode = 0;
-        let globalHue = 0;
+        let globalHue = 180;
         let time = 0;
         let lastGestureTime = 0;
         let backgroundPatterns = [];
+
+        // Hand-specific controls
+        let halftoneScale = 1.0;  // Controlled by left hand
+        let rightHandHue = 180;    // Controlled by right hand position
 
         // Offscreen canvas for performance
         let offCanvas, offCtx;
@@ -336,13 +340,13 @@
                     const b = data[pixelIndex + 2];
 
                     const brightness = (r + g + b) / 3 / 255;
-                    let radius = (1 - brightness) * (dotSize / 2) * 1.5;
+                    let radius = (1 - brightness) * (dotSize / 2) * 1.5 * halftoneScale;
 
                     if (radius < 0.5) continue;
 
                     // Mix color based on hand proximity
                     let mixFactor = 0;
-                    let closestHue = globalHue;
+                    let closestHue = rightHandHue;
 
                     handAreas.forEach(area => {
                         const dist = Math.sqrt((x - area.x) ** 2 + (y - area.y) ** 2);
@@ -634,24 +638,45 @@
             hands.onResults((results) => {
                 if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                     handsData = results.multiHandLandmarks.map((landmarks, index) => {
-                        const existing = handsData[index] || {};
+                        const existing = handsData.find(h => h.handedness === results.multiHandedness[index].label) || {};
                         const gesture = detectGesture(landmarks);
                         const palm = landmarks[9];
                         const hue = (1 - palm.y) * 360;
+                        const handedness = results.multiHandedness[index].label; // "Left" or "Right"
 
                         return {
                             landmarks,
                             gesture,
                             hue,
+                            handedness,
                             lastFistTime: existing.lastFistTime || 0,
                             lastSpreadTime: existing.lastSpreadTime || 0
                         };
                     });
 
-                    // Update global hue
-                    if (handsData.length > 0) {
-                        globalHue = handsData[0].hue;
-                    }
+                    // Update controls based on handedness
+                    handsData.forEach(hand => {
+                        if (hand.handedness === 'Left') {
+                            // Left hand controls scale
+                            // Use the distance between thumb and index finger to control scale
+                            const thumb = hand.landmarks[4];
+                            const index = hand.landmarks[8];
+                            const dist = Math.sqrt(
+                                Math.pow(thumb.x - index.x, 2) +
+                                Math.pow(thumb.y - index.y, 2)
+                            );
+                            // Map distance to scale (0.05 to 0.3 distance -> 0.3 to 3.0 scale)
+                            halftoneScale = Math.max(0.3, Math.min(3.0, (dist - 0.05) / 0.25 * 2.7 + 0.3));
+                        } else if (hand.handedness === 'Right') {
+                            // Right hand controls color by position
+                            const palm = hand.landmarks[9];
+                            // X position controls hue (0 to 360 degrees)
+                            const xHue = palm.x * 360;
+                            // Y position can modify saturation/brightness or just be part of hue calculation
+                            const yInfluence = palm.y * 180;
+                            rightHandHue = (xHue + yInfluence) % 360;
+                        }
+                    });
                 } else {
                     handsData = [];
                 }

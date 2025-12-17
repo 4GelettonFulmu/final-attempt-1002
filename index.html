@@ -115,12 +115,15 @@
         let handsData = [];
         let particles = [];
         let ripples = [];
+        let colorTrails = [];
         let dotSize = 8;
         let patternMode = 0;
         let globalHue = 0;
+        let globalHueShift = 0;
         let time = 0;
         let lastGestureTime = 0;
         let backgroundPatterns = [];
+        let screenColorOverlay = { hue: 0, intensity: 0 };
 
         // Offscreen canvas for performance
         let offCanvas, offCtx;
@@ -237,6 +240,39 @@
             }
         }
 
+        // Color Trail class
+        class ColorTrail {
+            constructor(x, y, hue) {
+                this.x = x;
+                this.y = y;
+                this.hue = hue;
+                this.size = Math.random() * 8 + 4;
+                this.life = 1;
+                this.decay = 0.02;
+            }
+
+            update() {
+                this.life -= this.decay;
+                this.size *= 0.96;
+            }
+
+            draw() {
+                if (this.life <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = this.life * 0.6;
+
+                const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
+                gradient.addColorStop(0, `hsla(${this.hue}, 100%, 60%, 0.8)`);
+                gradient.addColorStop(0.5, `hsla(${(this.hue + 30) % 360}, 100%, 50%, 0.4)`);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
         // Gesture detection
         function detectGesture(landmarks) {
             const thumbTip = landmarks[4];
@@ -340,6 +376,9 @@
 
                     if (radius < 0.5) continue;
 
+                    // Add position-based color shift for rainbow effect
+                    const positionHue = (x / width * 360 + y / height * 180 + globalHueShift) % 360;
+
                     // Mix color based on hand proximity
                     let mixFactor = 0;
                     let closestHue = globalHue;
@@ -364,10 +403,18 @@
                         }
                     });
 
-                    const baseColor = hslToRgb(closestHue / 360, 0.8, 0.5);
-                    const finalR = Math.floor(r * (1 - mixFactor) + baseColor.r * mixFactor);
-                    const finalG = Math.floor(g * (1 - mixFactor) + baseColor.g * mixFactor);
-                    const finalB = Math.floor(b * (1 - mixFactor) + baseColor.b * mixFactor);
+                    // Blend position hue with hand hue
+                    const finalHue = mixFactor > 0.3 ? closestHue : (closestHue * mixFactor + positionHue * (1 - mixFactor));
+
+                    // Increase saturation and brightness for more vibrant colors
+                    const saturation = 0.85 + mixFactor * 0.15;
+                    const lightness = 0.5 + Math.sin(time * 0.02) * 0.1;
+
+                    const baseColor = hslToRgb(finalHue / 360, saturation, lightness);
+                    const colorMix = Math.max(0.3, mixFactor + 0.3); // Always some color
+                    const finalR = Math.floor(r * (1 - colorMix) + baseColor.r * colorMix);
+                    const finalG = Math.floor(g * (1 - colorMix) + baseColor.g * colorMix);
+                    const finalB = Math.floor(b * (1 - colorMix) + baseColor.b * colorMix);
 
                     ctx.fillStyle = `rgb(${finalR}, ${finalG}, ${finalB})`;
 
@@ -424,23 +471,28 @@
                     dotSize = Math.min(12, dotSize + 0.05);
                 }
 
-                // Fist creates explosion
+                // Fist creates rainbow explosion
                 if (gesture.isFist && Date.now() - hand.lastFistTime > 800) {
                     const palmX = (1 - landmarks[9].x) * canvas.width;
                     const palmY = landmarks[9].y * canvas.height;
 
-                    for (let i = 0; i < 30; i++) {
-                        particles.push(new Particle(palmX, palmY, `hsl(${hue}, 80%, 60%)`, 'explosion'));
+                    for (let i = 0; i < 50; i++) {
+                        const explosionHue = (hue + i * 7.2) % 360; // Rainbow colors
+                        particles.push(new Particle(palmX, palmY, `hsl(${explosionHue}, 100%, 60%)`, 'explosion'));
                     }
-                    ripples.push(new Ripple(palmX, palmY, `hsl(${hue}, 80%, 60%)`));
+                    // Multiple ripples with different colors
+                    for (let i = 0; i < 3; i++) {
+                        ripples.push(new Ripple(palmX, palmY, `hsl(${(hue + i * 120) % 360}, 90%, 60%)`));
+                    }
                     hand.lastFistTime = Date.now();
                 }
 
-                // Spread fingers creates ripple
+                // Spread fingers creates multi-color ripple
                 if (gesture.isSpread && Date.now() - hand.lastSpreadTime > 300) {
                     const palmX = (1 - landmarks[9].x) * canvas.width;
                     const palmY = landmarks[9].y * canvas.height;
-                    ripples.push(new Ripple(palmX, palmY, `hsl(${hue}, 70%, 70%)`));
+                    ripples.push(new Ripple(palmX, palmY, `hsl(${hue}, 100%, 70%)`));
+                    ripples.push(new Ripple(palmX, palmY, `hsl(${(hue + 180) % 360}, 100%, 70%)`));
                     hand.lastSpreadTime = Date.now();
                 }
 
@@ -451,34 +503,45 @@
                     const tipX = (1 - tip.x) * canvas.width;
                     const tipY = tip.y * canvas.height;
 
-                    // Glow effect
-                    const gradient = ctx.createRadialGradient(tipX, tipY, 0, tipX, tipY, 40);
-                    gradient.addColorStop(0, `hsla(${(hue + i * 30) % 360}, 80%, 60%, 0.4)`);
+                    // Each finger gets unique color
+                    const fingerHue = (hue + i * 72) % 360; // Pentagonal color spread
+
+                    // Enhanced glow effect with multiple colors
+                    const gradient = ctx.createRadialGradient(tipX, tipY, 0, tipX, tipY, 60);
+                    gradient.addColorStop(0, `hsla(${fingerHue}, 100%, 70%, 0.6)`);
+                    gradient.addColorStop(0.5, `hsla(${(fingerHue + 60) % 360}, 100%, 60%, 0.3)`);
                     gradient.addColorStop(1, 'transparent');
                     ctx.fillStyle = gradient;
                     ctx.beginPath();
-                    ctx.arc(tipX, tipY, 40, 0, Math.PI * 2);
+                    ctx.arc(tipX, tipY, 60, 0, Math.PI * 2);
                     ctx.fill();
 
-                    // Concentric rings
-                    const rings = gesture.isPinching ? 6 : 4;
+                    // Concentric rings with rainbow effect
+                    const rings = gesture.isPinching ? 8 : 5;
                     for (let r = rings; r >= 0; r--) {
-                        const radius = (r + 1) * (gesture.isPinching ? 6 : 5);
-                        const pulse = Math.sin(time * 0.1 + r * 0.5) * 2;
+                        const radius = (r + 1) * (gesture.isPinching ? 7 : 6);
+                        const pulse = Math.sin(time * 0.15 + r * 0.3) * 3;
+                        const ringHue = (fingerHue + r * 20 + time) % 360;
 
                         ctx.beginPath();
                         ctx.arc(tipX, tipY, radius + pulse, 0, Math.PI * 2);
-                        ctx.fillStyle = `hsla(${(hue + i * 30 + r * 10) % 360}, 80%, ${50 + r * 8}%, ${0.2 + r * 0.1})`;
+                        ctx.fillStyle = `hsla(${ringHue}, 100%, ${60 + r * 5}%, ${0.3 + r * 0.08})`;
                         ctx.fill();
                     }
 
-                    // Spawn particles from fingertips
-                    if (Math.random() > 0.6) {
-                        particles.push(new Particle(tipX, tipY, `hsl(${(hue + i * 30) % 360}, 80%, 60%)`));
+                    // Spawn colorful particles from fingertips
+                    if (Math.random() > 0.5) {
+                        const particleHue = (fingerHue + Math.random() * 60) % 360;
+                        particles.push(new Particle(tipX, tipY, `hsl(${particleHue}, 100%, 65%)`));
+                    }
+
+                    // Add color trails
+                    if (Math.random() > 0.7) {
+                        colorTrails.push(new ColorTrail(tipX, tipY, fingerHue));
                     }
                 });
 
-                // Draw skeleton with dotted lines
+                // Draw skeleton with rainbow dotted lines
                 const connections = [
                     [0, 1], [1, 2], [2, 3], [3, 4],
                     [0, 5], [5, 6], [6, 7], [7, 8],
@@ -488,7 +551,7 @@
                     [0, 17]
                 ];
 
-                connections.forEach(([i, j]) => {
+                connections.forEach(([i, j], connectionIndex) => {
                     const p1 = landmarks[i];
                     const p2 = landmarks[j];
                     const x1 = (1 - p1.x) * canvas.width;
@@ -497,33 +560,53 @@
                     const y2 = p2.y * canvas.height;
 
                     const dist = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-                    const dots = Math.floor(dist / 6);
+                    const dots = Math.floor(dist / 5);
 
                     for (let d = 0; d <= dots; d++) {
                         const t = d / dots;
                         const dx = x1 + (x2 - x1) * t;
                         const dy = y1 + (y2 - y1) * t;
-                        const size = 2 + Math.sin(time * 0.05 + d * 0.3) * 1;
+                        const size = 2.5 + Math.sin(time * 0.08 + d * 0.4) * 1.2;
+
+                        // Rainbow colors along skeleton
+                        const dotHue = (hue + connectionIndex * 17 + d * 15 + time * 0.5) % 360;
 
                         ctx.beginPath();
                         ctx.arc(dx, dy, size, 0, Math.PI * 2);
-                        ctx.fillStyle = `hsla(${hue}, 70%, 70%, 0.6)`;
+                        ctx.fillStyle = `hsla(${dotHue}, 100%, 70%, 0.8)`;
                         ctx.fill();
+
+                        // Add glow to skeleton dots
+                        ctx.shadowBlur = 8;
+                        ctx.shadowColor = `hsla(${dotHue}, 100%, 60%, 0.6)`;
+                        ctx.fill();
+                        ctx.shadowBlur = 0;
                     }
                 });
 
-                // Draw palm aura
+                // Draw multi-colored palm aura
                 const palmX = (1 - landmarks[9].x) * canvas.width;
                 const palmY = landmarks[9].y * canvas.height;
 
-                const auraGradient = ctx.createRadialGradient(palmX, palmY, 0, palmX, palmY, 100);
-                auraGradient.addColorStop(0, `hsla(${hue}, 70%, 50%, 0.3)`);
-                auraGradient.addColorStop(0.5, `hsla(${hue}, 70%, 50%, 0.1)`);
-                auraGradient.addColorStop(1, 'transparent');
-                ctx.fillStyle = auraGradient;
-                ctx.beginPath();
-                ctx.arc(palmX, palmY, 100 + Math.sin(time * 0.05) * 20, 0, Math.PI * 2);
-                ctx.fill();
+                // Multiple aura layers with different colors
+                for (let layer = 0; layer < 3; layer++) {
+                    const layerHue = (hue + layer * 120) % 360;
+                    const layerSize = 120 - layer * 20;
+                    const pulse = Math.sin(time * 0.05 + layer * 0.5) * 15;
+
+                    const auraGradient = ctx.createRadialGradient(palmX, palmY, 0, palmX, palmY, layerSize + pulse);
+                    auraGradient.addColorStop(0, `hsla(${layerHue}, 100%, 60%, ${0.4 - layer * 0.1})`);
+                    auraGradient.addColorStop(0.5, `hsla(${(layerHue + 60) % 360}, 100%, 50%, ${0.2 - layer * 0.05})`);
+                    auraGradient.addColorStop(1, 'transparent');
+                    ctx.fillStyle = auraGradient;
+                    ctx.beginPath();
+                    ctx.arc(palmX, palmY, layerSize + pulse, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Update screen color overlay based on hand position
+                screenColorOverlay.hue = hue;
+                screenColorOverlay.intensity = Math.min(0.3, screenColorOverlay.intensity + 0.01);
             });
         }
 
@@ -532,10 +615,11 @@
             ctx.fillStyle = '#0a0a0a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Animated background dots
-            backgroundPatterns.forEach(p => {
+            // Animated colorful background dots
+            backgroundPatterns.forEach((p, index) => {
                 p.x += Math.cos(p.angle) * p.speed;
                 p.y += Math.sin(p.angle) * p.speed;
+                p.angle += 0.001; // Slowly change direction
 
                 // Wrap around
                 if (p.x < 0) p.x = canvas.width;
@@ -543,16 +627,43 @@
                 if (p.y < 0) p.y = canvas.height;
                 if (p.y > canvas.height) p.y = 0;
 
+                // Each dot gets a unique color based on position and time
+                const dotHue = (index * 7.2 + time * 0.3 + (p.x / canvas.width) * 60) % 360;
+
+                const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3);
+                gradient.addColorStop(0, `hsla(${dotHue}, 80%, 60%, 0.2)`);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
                 ctx.beginPath();
-                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255, 255, 255, 0.1)`;
+                ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
                 ctx.fill();
             });
+
+            // Screen-wide color overlay that shifts with hand movement
+            if (screenColorOverlay.intensity > 0) {
+                ctx.globalAlpha = screenColorOverlay.intensity;
+                const overlayGradient = ctx.createRadialGradient(
+                    canvas.width / 2, canvas.height / 2, 0,
+                    canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height)
+                );
+                overlayGradient.addColorStop(0, `hsla(${screenColorOverlay.hue}, 70%, 50%, 0.15)`);
+                overlayGradient.addColorStop(0.5, `hsla(${(screenColorOverlay.hue + 60) % 360}, 60%, 40%, 0.08)`);
+                overlayGradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = overlayGradient;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.globalAlpha = 1.0;
+
+                // Slowly fade out overlay when hands are gone
+                if (handsData.length === 0) {
+                    screenColorOverlay.intensity = Math.max(0, screenColorOverlay.intensity - 0.005);
+                }
+            }
         }
 
         // Main render loop
         function render() {
             time++;
+            globalHueShift = (globalHueShift + 0.5) % 360; // Continuous color cycling
 
             drawBackground();
 
@@ -586,6 +697,13 @@
                 drawHalftone(imageData);
             }
 
+            // Update and draw color trails
+            colorTrails = colorTrails.filter(t => t.life > 0);
+            colorTrails.forEach(t => {
+                t.update();
+                t.draw();
+            });
+
             // Update and draw ripples
             ripples = ripples.filter(r => r.life > 0);
             ripples.forEach(r => {
@@ -603,13 +721,14 @@
             // Draw hands
             drawHands();
 
-            // Vignette effect
+            // Colorful vignette effect that shifts with global hue
             const vignetteGradient = ctx.createRadialGradient(
                 canvas.width / 2, canvas.height / 2, canvas.height * 0.3,
                 canvas.width / 2, canvas.height / 2, canvas.height * 0.8
             );
             vignetteGradient.addColorStop(0, 'transparent');
-            vignetteGradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+            vignetteGradient.addColorStop(0.7, `hsla(${globalHueShift}, 40%, 10%, 0.2)`);
+            vignetteGradient.addColorStop(1, `hsla(${(globalHueShift + 180) % 360}, 50%, 5%, 0.5)`);
             ctx.fillStyle = vignetteGradient;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -637,7 +756,11 @@
                         const existing = handsData[index] || {};
                         const gesture = detectGesture(landmarks);
                         const palm = landmarks[9];
-                        const hue = (1 - palm.y) * 360;
+
+                        // Dynamic color based on both X and Y position for more variety
+                        const hueY = (1 - palm.y) * 240; // Vertical movement affects hue
+                        const hueX = palm.x * 120; // Horizontal movement adds variation
+                        const hue = (hueY + hueX + time * 0.3) % 360; // Add time-based shift
 
                         return {
                             landmarks,
@@ -648,9 +771,10 @@
                         };
                     });
 
-                    // Update global hue
+                    // Update global hue - blend all hand colors
                     if (handsData.length > 0) {
-                        globalHue = handsData[0].hue;
+                        const avgHue = handsData.reduce((sum, hand) => sum + hand.hue, 0) / handsData.length;
+                        globalHue = avgHue;
                     }
                 } else {
                     handsData = [];

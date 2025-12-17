@@ -638,11 +638,13 @@
             hands.onResults((results) => {
                 if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                     handsData = results.multiHandLandmarks.map((landmarks, index) => {
-                        const existing = handsData.find(h => h.handedness === results.multiHandedness[index].label) || {};
                         const gesture = detectGesture(landmarks);
                         const palm = landmarks[9];
                         const hue = (1 - palm.y) * 360;
-                        const handedness = results.multiHandedness[index].label; // "Left" or "Right"
+                        // BUG FIX: Since video is mirrored, swap handedness labels
+                        const rawHandedness = results.multiHandedness[index].label;
+                        const handedness = rawHandedness === 'Left' ? 'Right' : 'Left';
+                        const existing = handsData.find(h => h.handedness === handedness) || {};
 
                         return {
                             landmarks,
@@ -663,18 +665,22 @@
                             const index = hand.landmarks[8];
                             const dist = Math.sqrt(
                                 Math.pow(thumb.x - index.x, 2) +
-                                Math.pow(thumb.y - index.y, 2)
+                                Math.pow(thumb.y - index.y, 2) +
+                                Math.pow(thumb.z - index.z, 2)
                             );
-                            // Map distance to scale (0.05 to 0.3 distance -> 0.3 to 3.0 scale)
-                            halftoneScale = Math.max(0.3, Math.min(3.0, (dist - 0.05) / 0.25 * 2.7 + 0.3));
+                            // BUG FIX: Improved scale mapping - more intuitive range
+                            // Map distance (0.02 to 0.35) -> scale (0.3 to 3.0)
+                            const normalizedDist = Math.max(0, Math.min(1, (dist - 0.02) / 0.33));
+                            halftoneScale = 0.3 + normalizedDist * 2.7;
                         } else if (hand.handedness === 'Right') {
                             // Right hand controls color by position
                             const palm = hand.landmarks[9];
-                            // X position controls hue (0 to 360 degrees)
-                            const xHue = palm.x * 360;
-                            // Y position can modify saturation/brightness or just be part of hue calculation
-                            const yInfluence = palm.y * 180;
-                            rightHandHue = (xHue + yInfluence) % 360;
+                            // BUG FIX: Better color control - X for hue, Y for additional variation
+                            // X position (0 to 1) maps to hue (0 to 360)
+                            const baseHue = palm.x * 360;
+                            // Y position adds smooth variation without sudden jumps
+                            const yVariation = Math.sin(palm.y * Math.PI) * 60;
+                            rightHandHue = (baseHue + yVariation + 360) % 360;
                         }
                     });
                 } else {

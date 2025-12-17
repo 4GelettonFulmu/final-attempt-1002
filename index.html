@@ -115,7 +115,7 @@
         let handsData = [];
         let particles = [];
         let ripples = [];
-        let dotSize = 8;
+        let dotSize = 12;  // Increased from 8 for more prominence
         let patternMode = 0;
         let globalHue = 180;
         let time = 0;
@@ -340,7 +340,8 @@
                     const b = data[pixelIndex + 2];
 
                     const brightness = (r + g + b) / 3 / 255;
-                    let radius = (1 - brightness) * (dotSize / 2) * 1.5 * halftoneScale;
+                    // Increased multiplier from 1.5 to 2.2 for more prominent dots
+                    let radius = (1 - brightness) * (dotSize / 2) * 2.2 * halftoneScale;
 
                     if (radius < 0.5) continue;
 
@@ -368,15 +369,23 @@
                         }
                     });
 
-                    const baseColor = hslToRgb(closestHue / 360, 0.8, 0.5);
-                    const finalR = Math.floor(r * (1 - mixFactor) + baseColor.r * mixFactor);
-                    const finalG = Math.floor(g * (1 - mixFactor) + baseColor.g * mixFactor);
-                    const finalB = Math.floor(b * (1 - mixFactor) + baseColor.b * mixFactor);
+                    // Increased saturation from 0.8 to 0.95 and boosted mix factor for more vibrant colors
+                    const baseColor = hslToRgb(closestHue / 360, 0.95, 0.55);
+                    const enhancedMixFactor = Math.min(1, mixFactor * 1.5);
+                    const finalR = Math.floor(r * (1 - enhancedMixFactor) + baseColor.r * enhancedMixFactor);
+                    const finalG = Math.floor(g * (1 - enhancedMixFactor) + baseColor.g * enhancedMixFactor);
+                    const finalB = Math.floor(b * (1 - enhancedMixFactor) + baseColor.b * enhancedMixFactor);
 
                     ctx.fillStyle = `rgb(${finalR}, ${finalG}, ${finalB})`;
 
                     const drawX = x + offsetX;
                     const drawY = y + offsetY;
+
+                    // Add subtle glow effect for more prominence
+                    if (radius > 2) {
+                        ctx.shadowBlur = radius * 0.8;
+                        ctx.shadowColor = `rgba(${finalR}, ${finalG}, ${finalB}, 0.6)`;
+                    }
 
                     // Different patterns
                     switch (patternMode) {
@@ -404,6 +413,9 @@
                             ctx.stroke();
                             break;
                     }
+
+                    // Reset shadow for next iteration
+                    ctx.shadowBlur = 0;
                 }
             }
         }
@@ -421,11 +433,11 @@
                     lastGestureTime = Date.now();
                 }
 
-                // Dot size based on pinch
+                // Dot size based on pinch - increased max from 12 to 18 for more prominence
                 if (gesture.isPinching) {
-                    dotSize = Math.max(3, dotSize - 0.3);
+                    dotSize = Math.max(4, dotSize - 0.3);
                 } else {
-                    dotSize = Math.min(12, dotSize + 0.05);
+                    dotSize = Math.min(18, dotSize + 0.05);
                 }
 
                 // Fist creates explosion
